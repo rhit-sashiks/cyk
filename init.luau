@@ -22,6 +22,71 @@ type Rule = {
 
 type RuleSet = {[number]: Rule}
 
+-- A path from root to a left/right with a probability attached to them
+type ParseTreePath = {
+    left: ParseTree?,
+    right: ParseTree?,
+    prob: number
+}
+
+-- A compact ParseTree where each root can split into multiple paths
+type ParseTree = {
+    root: string,
+    paths: {ParseTreePath},
+}
+
+type ProcessedParseTree = {
+    s: string,
+    prob: number
+}
+
+-- Returns a `{ProcessedParseTree}` from a `ParseTree`
+--
+-- Approach:
+-- - Start with root node 'r'
+local function parseTree(pt: ParseTree): {ProcessedParseTree}
+    local strings: {string} = {}
+    local prob: {number} = {}
+    local numChildren: {string} = {}
+    local function recurser(pt: ParseTree, pathIndex: number, currProb: number, currString: string, currNumChildren: string) : ()
+        for i, path in pt.paths do 
+            local numChildrenV = 0
+            if path.left then numChildrenV += 1 end
+            if path.right then numChildrenV += 1 end
+
+            local realIdx = pathIndex + i - 1
+
+            strings[realIdx] = if strings[realIdx] then strings[realIdx] .. pt.root else currString .. pt.root 
+            prob[realIdx] = if prob[realIdx] then prob[realIdx] * path.prob else currProb * path.prob
+            numChildren[realIdx] = if numChildren[realIdx] then numChildren[realIdx] .. tostring(numChildrenV) else currNumChildren .. tostring(numChildrenV)
+
+            if path.left then
+                recurser(path.left, pathIndex+i-1, currProb * path.prob, currString .. pt.root, currNumChildren .. tostring(numChildrenV))
+            end
+            if path.right then
+                recurser(path.right, pathIndex+i-1, currProb * path.prob, currString .. pt.root, currNumChildren .. tostring(numChildrenV))   
+            end
+        end
+    end
+
+    recurser(pt, 1, 1, "", "")
+    print("parseTree probs: ", prob)
+    print("parseTree strings (pre-order traversal)", strings)
+    print("num children (pre-order traversal)", numChildren)
+
+    local paths: {ProcessedParseTree} = {}
+
+    for i, p in prob do 
+        assert(#strings[i] == #numChildren[i], "Internal error: strings[i] != numChildren[i] - " .. #strings[i] .. " " .. #numChildren[i])
+        table.insert(paths, {
+            s = strings[i],
+            prob = p,
+            numChildren = numChildren[i]
+        })
+    end
+
+    return paths
+end
 
 -- Table reverser from https://stackoverflow.com/questions/72783502/how-does-one-reverse-the-items-in-a-table-in-lua
 local function reverse(tab)
@@ -58,7 +123,7 @@ local function tabulate(tab: {{string}}): string
     return table.concat(tabulated, "\n")
 end
 
-local function cyk(inputString: string, grammarRules: RuleSet, print: (...any) -> (), debug: boolean?): number? 
+local function cyk(inputString: string, grammarRules: RuleSet, print: (...any) -> (), debug: boolean?): ({number}, ParseTree?)
     -- Find all nonterminal rules first
     local nonterminalRules = {}
     for i, rule in grammarRules do 
@@ -100,7 +165,7 @@ local function cyk(inputString: string, grammarRules: RuleSet, print: (...any) -
     end
 
     -- Given two sets of rule labels, finds all rules which could have made up that rule
-    local function findRulesWithSymbol(symbol: string): {string} 
+    --[[local function findRulesWithSymbol(symbol: string): {string} 
         local foundRules: {[string]: RuleMap} = findRulesWithSymbolMap(symbol)
 
         local rules = {}
@@ -109,7 +174,7 @@ local function cyk(inputString: string, grammarRules: RuleSet, print: (...any) -
         end
 
         return rules
-    end
+    end]]
 
     type RuleMap = {
         a: string,
@@ -161,6 +226,7 @@ local function cyk(inputString: string, grammarRules: RuleSet, print: (...any) -
     end 
 
     type BackTrace = {
+        label: string,
         rules: RuleMap,
         i1: number,
         j1: number,
@@ -169,7 +235,10 @@ local function cyk(inputString: string, grammarRules: RuleSet, print: (...any) -
     }
 
     -- A second back grid for backtracing
-    local back: {{{[string]: BackTrace}}} = {}
+    local back: {{{
+        BackTrace
+        --[string]: BackTrace
+    }}} = {}
 
     -- Set all to empty initially
     for i = 1, #inputString do 
@@ -191,14 +260,17 @@ local function cyk(inputString: string, grammarRules: RuleSet, print: (...any) -
         end
 
         grid[i][1] = rules
+        
         for rule, comesFrom in ntRules do 
-            back[i][1][rule] = {
-                rules = comesFrom :: RuleMap,
-                i1 = i,
-                i2 = 0,
-                j1 = 1,
-                j2 = 0,
-            }
+            print("Got base rule " .. rule)
+            table.insert(back[i][1], {
+                    label = rule,
+                    rules = comesFrom :: RuleMap,
+                    i1 = i,
+                    i2 = 0,
+                    j1 = 1,
+                    j2 = 0,
+            })
         end
     end
 
@@ -234,13 +306,14 @@ local function cyk(inputString: string, grammarRules: RuleSet, print: (...any) -
 
                 for rule, comesFrom in findRulesMakingRuleMap(a, b) do 
                     ruleMap[rule] = true
-                    back[start][level][rule] = {
+                    table.insert(back[start][level], {
+                        label = rule,
                         rules = comesFrom :: RuleMap,
                         i1 = i1,
                         i2 = i2,
                         j1 = j1,
                         j2 = j2,
-                    }
+                    })
                 end
 
                 -- Go to next box
@@ -282,10 +355,10 @@ local function cyk(inputString: string, grammarRules: RuleSet, print: (...any) -
             local row = {}
             for j = 1, (#inputString - i + 1) do 
                 local backStr = {}
-                for rule, rulerow in back[j][i] do
+                for _, rulerow in back[j][i] do
                     print(i, j, rulerow)
                     -- string.format("%s: %s, ", rule, table.concat(rulerow.rules))
-                    backStr[#backStr + 1] = string.format("%s: %s (%d%d%d%d), ", rule, table.concat({rulerow.rules.a, rulerow.rules.b}), rulerow.i1, rulerow.j1, rulerow.i2, rulerow.j2)
+                    backStr[#backStr + 1] = string.format("%s: %s (%d%d%d%d), ", rulerow.label, table.concat({rulerow.rules.a, rulerow.rules.b}), rulerow.i1, rulerow.j1, rulerow.i2, rulerow.j2)
                 end
 
                 row[#row + 1] = (if backStr then table.concat(backStr, "") else "")
@@ -308,8 +381,8 @@ local function cyk(inputString: string, grammarRules: RuleSet, print: (...any) -
             local row = {}
             for j = 1, (#inputString - i + 1) do 
                 local backStr2 = {}
-                for rule, rulerow in back[j][i] do
-                    backStr2[#backStr2 + 1] = string.format("%s: %s, ", rule, table.concat({rulerow.rules.a, rulerow.rules.b}))
+                for _, rulerow in back[j][i] do
+                    backStr2[#backStr2 + 1] = string.format("%s: %s, ", rulerow.label, table.concat({rulerow.rules.a, rulerow.rules.b}))
                 end
 
                 row[#row + 1] = (if backStr then table.concat(backStr2, "") else "")
@@ -347,36 +420,59 @@ local function cyk(inputString: string, grammarRules: RuleSet, print: (...any) -
     end
 
     if not foundStart then 
-        return nil
+        return {}, nil
     end
 
     -- Backtrace the rules
-    local prob = 1
-    local function backTraceRule(i: number, j: number, rule: string, parent: string) 
-        local backtrace = back[i][j][rule]
-        if not backtrace then return end
-        if debug then
-            print("root: " .. rule .. " | left: " .. backtrace.rules.a .. " | right: " .. backtrace.rules.b .. " (" .. backtrace.rules.prob .. ") | parent: " .. parent)
+    local prob: {number} = {}
+    local function backTraceRule(i: number, j: number, rule: string, parent: string, probIdx: number, currProb: number): ParseTree 
+        local rules = {}
+        for _, brule in back[i][j] do 
+            if brule.label == rule then rules[#rules + 1] = brule end 
         end
 
-        prob *= backtrace.rules.prob
+        local parseTree: ParseTree = {
+            root = rule,
+            paths = {}
+        }
 
-        if backtrace.rules.a ~= "" then
-            backTraceRule(backtrace.i1, backtrace.j1, backtrace.rules.a, rule) 
+        for bi, backtrace in rules do 
+            bi = bi :: number
+            backtrace = backtrace :: BackTrace
+            local realIdx = probIdx + bi - 1
+            if debug then
+                print("At tree " .. (realIdx) .. ": root: " .. rule .. " | left: " .. backtrace.rules.a .. " | right: " .. backtrace.rules.b .. " (" .. backtrace.rules.prob .. ") | parent: " .. parent)
+            end
+
+            prob[realIdx] = if prob[realIdx] then prob[realIdx] * backtrace.rules.prob else currProb * backtrace.rules.prob
+
+            local path: ParseTreePath = {
+                prob = backtrace.rules.prob
+            }
+
+            if backtrace.rules.a ~= "" then
+                path.left = backTraceRule(backtrace.i1, backtrace.j1, backtrace.rules.a, rule, realIdx, currProb * backtrace.rules.prob) 
+            end
+    
+            if backtrace.rules.b ~= "" then
+                path.right = backTraceRule(backtrace.i2, backtrace.j2, backtrace.rules.b, rule, realIdx, currProb * backtrace.rules.prob) 
+            end    
+
+            table.insert(parseTree.paths, path)
         end
 
-        if backtrace.rules.b ~= "" then
-            backTraceRule(backtrace.i2, backtrace.j2, backtrace.rules.b, rule) 
-        end
+        return parseTree
     end
 
-    backTraceRule(1, #inputString, startLabel, "")
+    local ptree = backTraceRule(1, #inputString, startLabel, "", 1, 1, {
+        root = startLabel
+    })
 
     if debug then
-        print("Probability: " .. prob)
+        print("Probabilities", prob)
     end
 
-    return prob
+    return prob, ptree
 end
 
 --KH
@@ -471,9 +567,92 @@ local grammarRules_in: RuleSet = {
 local inputString_in = "dsse"
 
 -- Part A
-cyk(inputString_in, grammarRules_in, print :: any, true)
+local _, pt = cyk(inputString_in, grammarRules_in, print :: any, true)
+print(parseTree(pt :: ParseTree))
+
+-- Try an example with 2 parse trees
+local p1a = 0.5
+local q1a = 1 - p1a
+local p2a = 0.3
+local q2a = 1 - p2a
+local p3a = 0.8
+local q3a = 1 - p3a
+local p4a = 0.1
+local q4a = 1 - p4a
+_, pt = cyk(
+    "baaba",
+    {
+        {
+            kind = "Start",
+            label = "S0",
+            rule = "S",
+            probability = 1
+        },
+        -- S = AB|BC
+        {
+            kind = "TerminalProduct",
+            label = "S",
+            probability = p1a,
+            ruleA = "A",
+            ruleB = "B"
+        },
+        {
+            kind = "TerminalProduct",
+            label = "S",
+            probability = q1a,
+            ruleA = "B",
+            ruleB = "C"
+        },
+        -- A = BA | a
+        {
+            kind = "TerminalProduct",
+            label = "A",
+            probability = p2a,
+            ruleA = "B",
+            ruleB = "A"
+        },
+        {
+            kind = "Nonterminal",
+            label = "A",
+            probability = q2a,
+            symbol = "a"
+        },
+        -- B = CC | b
+        {
+            kind = "TerminalProduct",
+            label = "B",
+            probability = p3a,
+            ruleA = "C",
+            ruleB = "C"
+        },
+        {
+            kind = "Nonterminal",
+            label = "B",
+            probability = q3a,
+            symbol = "b"
+        },
+        -- C = AB | a
+        {
+            kind = "TerminalProduct",
+            label = "C",
+            probability = p4a,
+            ruleA = "A",
+            ruleB = "B"
+        },
+        {
+            kind = "Nonterminal",
+            label = "C",
+            probability = q4a,
+            symbol = "a"
+        },
+    },
+    print :: any, 
+    true
+)
+print(parseTree(pt :: ParseTree))
 
 -- Part B
+--[[
 local function dummyPrint(...) end
 local maxProb = 0
 
