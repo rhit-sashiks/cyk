@@ -20,7 +20,43 @@ type Rule = {
 
 type RuleSet = {[number]: Rule}
 
-local function cyk(inputString: string, grammarRules: RuleSet, print: (...any) -> ()): number? 
+
+-- Table reverser from https://stackoverflow.com/questions/72783502/how-does-one-reverse-the-items-in-a-table-in-lua
+local function reverse(tab)
+    for i = 1, #tab//2, 1 do
+        tab[i], tab[#tab-i+1] = tab[#tab-i+1], tab[i]
+    end
+    return tab
+end
+
+local function tabulate(tab: {{string}}): string
+    local tabulated = {}
+
+    -- Find the element in tab that is the largest in length
+    local maxElementSize = 0
+    for _, intab in tab do 
+        for _, key in intab do 
+            maxElementSize = math.max(#key, maxElementSize)
+        end
+    end
+
+    for i, intab in tab do 
+        -- Code here
+        local tabs = {}
+        for _, key in intab do 
+            -- Padding + String + Padding = MaxElementSize
+            -- Padding = (MaxElementSize - String) / 2
+            local s = key .. string.rep(" ", maxElementSize - #key)
+            tabs[#tabs + 1] = s
+        end
+
+        tabulated[#tabulated + 1] = "|" .. table.concat(tabs, "|") .. "|"
+    end
+
+    return table.concat(tabulated, "\n")
+end
+
+local function cyk(inputString: string, grammarRules: RuleSet, print: (...any) -> (), debug: boolean?): number? 
     -- Find all nonterminal rules first
     local nonterminalRules = {}
     for i, rule in grammarRules do 
@@ -29,7 +65,9 @@ local function cyk(inputString: string, grammarRules: RuleSet, print: (...any) -
         end
     end
 
-    print("Nonterminal rules", #nonterminalRules)
+    if debug then 
+        print("Nonterminal rules", #nonterminalRules)
+    end
 
     -- Same with terminal rules
     local terminalRules: {Rule} = {}
@@ -104,9 +142,10 @@ local function cyk(inputString: string, grammarRules: RuleSet, print: (...any) -
         return rules
     end
 
-    print("Rules making LS", findRulesMakingRule({"L"}, {"S"}))
-    print("Rules from {L,M} and {S,Q}", findRulesMakingRule({"L", "M"}, {"S", "Q"}))
-
+    if debug then 
+        print("Rules making LS", findRulesMakingRule({"L"}, {"S"}))
+        print("Rules from {L,M} and {S,Q}", findRulesMakingRule({"L", "M"}, {"S", "Q"}))
+    end
 
     -- Make a N by N grid where i is the the index of the row (horizontal), j is the vertical
     local grid = {}
@@ -161,13 +200,17 @@ local function cyk(inputString: string, grammarRules: RuleSet, print: (...any) -
         end
     end
 
-    print("GRID", grid)
+    if debug then 
+        print("GRID", grid)
+    end
 
     -- Go layer by layer, to construct the DP Table
     for level = 2, #inputString do -- The level
         -- Start from 1 and go up to inputString - the level + 1 (for string of length 3, does 3, 2, 1)
         for start = 1, (#inputString - level + 1) do 
-            print("At level " .. level .. " and start " .. start)
+            if debug then
+                print("At level " .. level .. " and start " .. start)
+            end
             -- Start conditions
             local j1 = 1
             local i1 = start
@@ -176,11 +219,17 @@ local function cyk(inputString: string, grammarRules: RuleSet, print: (...any) -
 
             local ruleMap: {[string]: boolean} = {}
             while j1 < level do
-                print(i1, j1, " | ", i2, j2)
+                if debug then
+                    print(i1, j1, " | ", i2, j2)
+                end
 
                 local a = grid[i1][j1]
                 local b = grid[i2][j2]
-                print(table.concat(a, "") .. " " ..  table.concat(b, ""))
+
+                if debug then
+                    print(table.concat(a, "") .. " " ..  table.concat(b, ""))
+                end
+
                 for rule, comesFrom in findRulesMakingRuleMap(a, b) do 
                     ruleMap[rule] = true
                     back[start][level][rule] = {
@@ -203,110 +252,79 @@ local function cyk(inputString: string, grammarRules: RuleSet, print: (...any) -
                 rules[#rules + 1] = rule
             end
 
-            print("Got rules", rules)
+            if debug then 
+                print("Got rules", rules)
+            end
             grid[start][level] = rules
         end
     end
 
     -- Print final DP grid
-    local finalGrid = {}
-    for i = 1, #inputString do 
-        local row = {}
-        for j = 1, #inputString do 
-            row[#row + 1] = (if grid[j][i] then table.concat(grid[j][i], "") else "")
-        end
-        finalGrid[#finalGrid + 1] = row
-    end 
+    if debug then 
+        local finalGrid = {}
+        for i = 1, #inputString do 
+            local row = {}
+            for j = 1, #inputString do 
+                row[#row + 1] = (if grid[j][i] then table.concat(grid[j][i], "") else "")
+            end
+            finalGrid[#finalGrid + 1] = row
+        end 
 
-    -- Table reverser from https://stackoverflow.com/questions/72783502/how-does-one-reverse-the-items-in-a-table-in-lua
-    local function reverse(tab)
-        for i = 1, #tab//2, 1 do
-            tab[i], tab[#tab-i+1] = tab[#tab-i+1], tab[i]
-        end
-        return tab
+        local gridStr = (tabulate)(reverse(finalGrid))
+
+        print("")
+        print(tostring(gridStr))    
+
+        local finalBack = {}
+        for i = 1, #inputString do 
+            local row = {}
+            for j = 1, (#inputString - i + 1) do 
+                local backStr = {}
+                for rule, rulerow in back[j][i] do
+                    print(i, j, rulerow)
+                    -- string.format("%s: %s, ", rule, table.concat(rulerow.rules))
+                    backStr[#backStr + 1] = string.format("%s: %s (%d%d%d%d), ", rule, table.concat({rulerow.rules.a, rulerow.rules.b}), rulerow.i1, rulerow.j1, rulerow.i2, rulerow.j2)
+                end
+
+                row[#row + 1] = (if backStr then table.concat(backStr, "") else "")
+            end
+
+            for j = (#inputString - i + 2), #inputString do
+                row[#row + 1] = ""
+            end
+
+            finalBack[#finalBack + 1] = row
+        end 
+
+        local backStr = (tabulate)(reverse(finalBack))
+
+        print("")
+        print(tostring(backStr))
+
+        local finalBack2 = {}
+        for i = 1, #inputString do 
+            local row = {}
+            for j = 1, (#inputString - i + 1) do 
+                local backStr2 = {}
+                for rule, rulerow in back[j][i] do
+                    backStr2[#backStr2 + 1] = string.format("%s: %s, ", rule, table.concat({rulerow.rules.a, rulerow.rules.b}))
+                end
+
+                row[#row + 1] = (if backStr then table.concat(backStr2, "") else "")
+            end
+
+            for j = (#inputString - i + 2), #inputString do
+                row[#row + 1] = ""
+            end
+
+            finalBack2[#finalBack2 + 1] = row
+        end 
+
+        local backStr2 = (tabulate)(reverse(finalBack2))
+
+        print("")
+        print(tostring(backStr2))
     end
-
-    local function tabulate(tab: {{string}}): string
-        local tabulated = {}
-
-        -- Find the element in tab that is the largest in length
-        local maxElementSize = 0
-        for _, intab in tab do 
-            for _, key in intab do 
-                maxElementSize = math.max(#key, maxElementSize)
-            end
-        end
-
-        for i, intab in tab do 
-            -- Code here
-            local tabs = {}
-            for _, key in intab do 
-                -- Padding + String + Padding = MaxElementSize
-                -- Padding = (MaxElementSize - String) / 2
-                local s = key .. string.rep(" ", maxElementSize - #key)
-                tabs[#tabs + 1] = s
-            end
-
-            tabulated[#tabulated + 1] = "|" .. table.concat(tabs, "|") .. "|"
-        end
-
-        return table.concat(tabulated, "\n")
-    end
-
-    local gridStr = (tabulate)(reverse(finalGrid))
-
-    print("")
-    print(tostring(gridStr))
-
-    local finalBack = {}
-    for i = 1, #inputString do 
-        local row = {}
-        for j = 1, (#inputString - i + 1) do 
-            local backStr = {}
-            for rule, rulerow in back[j][i] do
-                print(i, j, rulerow)
-                -- string.format("%s: %s, ", rule, table.concat(rulerow.rules))
-                backStr[#backStr + 1] = string.format("%s: %s (%d%d%d%d), ", rule, table.concat({rulerow.rules.a, rulerow.rules.b}), rulerow.i1, rulerow.j1, rulerow.i2, rulerow.j2)
-            end
-
-            row[#row + 1] = (if backStr then table.concat(backStr, "") else "")
-        end
-
-        for j = (#inputString - i + 2), #inputString do
-            row[#row + 1] = ""
-        end
-
-        finalBack[#finalBack + 1] = row
-    end 
-
-    local backStr = (tabulate)(reverse(finalBack))
-
-    print("")
-    print(tostring(backStr))
-
-    local finalBack2 = {}
-    for i = 1, #inputString do 
-        local row = {}
-        for j = 1, (#inputString - i + 1) do 
-            local backStr2 = {}
-            for rule, rulerow in back[j][i] do
-                backStr2[#backStr2 + 1] = string.format("%s: %s, ", rule, table.concat({rulerow.rules.a, rulerow.rules.b}))
-            end
-
-            row[#row + 1] = (if backStr then table.concat(backStr2, "") else "")
-        end
-
-        for j = (#inputString - i + 2), #inputString do
-            row[#row + 1] = ""
-        end
-
-        finalBack2[#finalBack2 + 1] = row
-    end 
-
-    local backStr2 = (tabulate)(reverse(finalBack2))
-
-    print("")
-    print(tostring(backStr2))
 
     local startLabel = nil
     for _, rule in grammarRules do 
@@ -335,7 +353,9 @@ local function cyk(inputString: string, grammarRules: RuleSet, print: (...any) -
     local function backTraceRule(i: number, j: number, rule: string, parent: string) 
         local backtrace = back[i][j][rule]
         if not backtrace then return end
-        print("root: " .. rule .. " | left: " .. backtrace.rules.a .. " | right: " .. backtrace.rules.b .. " (" .. backtrace.rules.prob .. ") | parent: " .. parent)
+        if debug then
+            print("root: " .. rule .. " | left: " .. backtrace.rules.a .. " | right: " .. backtrace.rules.b .. " (" .. backtrace.rules.prob .. ") | parent: " .. parent)
+        end
 
         prob *= backtrace.rules.prob
 
@@ -350,7 +370,9 @@ local function cyk(inputString: string, grammarRules: RuleSet, print: (...any) -
 
     backTraceRule(1, #inputString, startLabel, "")
 
-    print("Probability: " .. prob)
+    if debug then
+        print("Probability: " .. prob)
+    end
 
     return prob
 end
@@ -447,17 +469,31 @@ local grammarRules_in: RuleSet = {
 local inputString_in = "dsse"
 
 -- Part A
-cyk(inputString_in, grammarRules_in, print :: any)
+cyk(inputString_in, grammarRules_in, print :: any, true)
 
 -- Part B
+local function dummyPrint(...) end
+local maxProb = 0
+
 -- Fast algo adopted from https://stackoverflow.com/questions/71683221/generation-of-all-sequences-of-length-n-from-numbers-0-1-k-1-with-minimal-change
 local n = 19
+
+local totalPermutes = 3^n
+local shownPermutes = 0
+local lastShownProgress = 0
 
 local s = {}
 for i = 1, n do 
     s[#s + 1] = "s"
 end
 while true do
+    shownPermutes += 1
+    local str = table.concat(s)
+    local prob = cyk(table.concat(s), grammarRules_in, dummyPrint :: any, false)
+    if prob and prob > maxProb then 
+        lastShownProgress = (shownPermutes / totalPermutes) * 100
+        print("New max prob of " .. prob .. " with string " .. str .. " with progress of [" .. lastShownProgress .. "%]")
+    end
     --print(table.concat(s))
 
     local k = n
@@ -472,6 +508,12 @@ while true do
         s[k] = "d"
     elseif s[k] == "d" then
         s[k] = "e" 
+    end
+
+    local newLastShownProgress = (shownPermutes / totalPermutes) * 100
+    if newLastShownProgress - lastShownProgress > 5 then 
+        print("Status update: " .. newLastShownProgress .. "%")
+        lastShownProgress = newLastShownProgress
     end
 end
 
