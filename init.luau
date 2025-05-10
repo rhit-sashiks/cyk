@@ -1,4 +1,6 @@
+--!optimize 2
 --!strict
+
 
 type Rule = {
     kind: "Nonterminal",
