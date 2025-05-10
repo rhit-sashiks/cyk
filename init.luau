@@ -20,6 +20,13 @@ type Rule = {
     rule: string -- Label of rule
 }
 
+local p1 = 0.869
+local q1 = 0.131
+local p2 = 0.895
+local q2 = 0.105
+local p3 = 0.788
+local q3 = 0.212
+
 local grammarRules: {[number]: Rule} = {
     {
         kind = "Start",
@@ -31,49 +38,49 @@ local grammarRules: {[number]: Rule} = {
     {
         kind = "TerminalProduct",
         label = "S",
-        probability = 1,
+        probability = p1,
         ruleA = "L",
         ruleB = "S",
     },
     {
         kind = "TerminalProduct",
         label = "S",
-        probability = 1,
+        probability = q1*p2,
         ruleA = "M",
         ruleB = "Q",
     },
     {
         kind = "Nonterminal",
         label = "S",
-        probability = 1,
+        probability = q1*q2,
         symbol = "s"
     },
     -- L = MQ|s
     {
         kind = "TerminalProduct",
         label = "L",
-        probability = 1,
+        probability = p2,
         ruleA = "M",
         ruleB = "Q"
     },
     {
         kind = "Nonterminal",
         label = "L",
-        probability = 1,
+        probability = q2,
         symbol = "s"
     },
     -- F = MQ|LS
     {
         kind = "TerminalProduct",
         label = "F",
-        probability = 1,
+        probability = p3,
         ruleA = "M",
         ruleB = "Q"
     },
     {
         kind = "TerminalProduct",
         label = "F",
-        probability = 1,
+        probability = q3,
         ruleA = "L",
         ruleB = "S"
     },
@@ -396,7 +403,7 @@ for _, rule in grammarRules do
     end
 end
 
-assert(startLabel, "No Start rule found")
+assert(startLabel, "No `Start` rule found")
 
 local foundStart = false
 for _, element in grid[1][#inputString] do
@@ -409,3 +416,25 @@ end
 if not foundStart then 
     error("The specified input string is not present in the grammar")
 end
+
+-- Backtrace the rules
+local prob = 1
+local function backTraceRule(i: number, j: number, rule: string, parent: string) 
+    local backtrace = back[i][j][rule]
+    if not backtrace then return end
+    print("root: " .. rule .. " | left: " .. backtrace.rules.a .. " | right: " .. backtrace.rules.b .. " (" .. backtrace.rules.prob .. ") | parent: " .. parent)
+
+    prob *= backtrace.rules.prob
+
+    if backtrace.rules.a ~= "" then
+        backTraceRule(backtrace.i1, backtrace.j1, backtrace.rules.a, rule) 
+    end
+
+    if backtrace.rules.b ~= "" then
+        backTraceRule(backtrace.i2, backtrace.j2, backtrace.rules.b, rule) 
+    end
+end
+
+backTraceRule(1, #inputString, startLabel, "")
+
+print("Probability: " .. prob)
