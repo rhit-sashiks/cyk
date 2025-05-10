@@ -1,6 +1,194 @@
 --!optimize 2
 --!strict
 
+-- Vendored: pp (https://github.com/luau-lang/lute/blob/primary/batteries/pp.luau) with some patches to make the output look nicer
+local isPrimitiveType = { string = true, number = true, boolean = true }
+
+local typeSortOrder: { [string]: number } = {
+	["boolean"] = 1,
+	["number"] = 2,
+	["string"] = 3,
+	["function"] = 4,
+	["vector"] = 5,
+	["buffer"] = 6,
+	["thread"] = 7,
+	["table"] = 8,
+	["userdata"] = 9,
+	["nil"] = 10,
+}
+
+local function isPrimitiveArray(array: { [unknown]: unknown }): boolean
+	local max, len = 0, #array
+
+	for key, value in array do
+		if type(key) ~= "number" then
+			return false
+		elseif key <= 0 then
+			return false
+		-- userdatas arent primitives
+		elseif not isPrimitiveType[type(value)] then
+			return false
+		end
+
+		max = math.max(key, max)
+	end
+
+	return len == max
+end
+
+local function getFormattedAdress(t: {}): string
+	return `table<({t})>`
+end
+
+local function formatValue(value: unknown): string
+	if type(value) == "table" then
+		return getFormattedAdress(value) -- simple representation for table values
+	elseif type(value) ~= "string" then
+		return tostring(value)
+	end
+
+	return value
+end
+
+local function formatKey(key: unknown, seq: boolean): string
+	if seq then
+		return ""
+	end
+
+	if type(key) == "table" then
+		return `[{getFormattedAdress(key)}] = ` -- TODO: handling for table keys
+	end
+	if type(key) ~= "string" then
+		return `[{tostring(key)}] =`
+	end
+
+	-- key is a simple identifier
+	if string.match(key, "^[%a_][%w_]-$") == key then
+		return `{key} = `
+	end
+
+	return `[{key}] = `
+end
+
+local function isEmpty(t: { [unknown]: unknown }): boolean
+	for _ in t do
+		return false
+	end
+	return true
+end
+
+local function traverseTable(
+	dataTable: { [unknown]: unknown },
+	seen: { [unknown]: boolean },
+	indent: number
+): string
+	local output = ""
+	local indentStr = string.rep("  ", indent)
+
+	local keys = {}
+
+	-- Collect all keys, not just primitives
+	for key in dataTable do
+		table.insert(keys, key)
+	end
+
+	table.sort(keys, function(a: string, b: string): boolean
+		local typeofTableA, typeofTableB = typeof(dataTable[a]), typeof(dataTable[b])
+
+		if typeofTableA ~= typeofTableB then
+			return typeSortOrder[typeofTableA] < typeSortOrder[typeofTableB]
+		end
+
+		if type(a) == "number" and type(b) == "number" then
+			return a < b
+		end
+
+		return tostring(a) < tostring(b)
+	end)
+
+	local inSequence = false
+	local previousKey = 0
+
+	for idx, key in keys do
+        key = key :: string
+		if type(key) == "number" and key > 0 and key - 1 == previousKey then
+			previousKey = key
+			inSequence = true
+		else
+			inSequence = false
+		end
+
+		local value = dataTable[key]
+
+		if type(value) ~= "table" then
+			output = `{output}{indentStr}{formatKey(key, inSequence)}{formatValue(value)},\n`
+			continue
+		end
+
+		-- prevents self-referential tables from looping infinitely
+		if seen[value] then
+			output = `{output}{indentStr}{formatKey(key, inSequence)}[Circular Reference <({value})>],\n`
+			continue
+		else
+			seen[value] = true
+		end
+
+		if isEmpty(value :: { [unknown]: unknown }) then
+			output = string.format("%s%s%s{},\n", output, indentStr, formatKey(key, inSequence))
+			continue
+		end
+
+		-- FIXME(luau): `{[unknown]: unknown} should be treated identically to `table`
+		if isPrimitiveArray(value :: { [unknown]: unknown }) then -- collapse primitive arrays
+			local outputConcatTbl = table.create(#value) :: { string }
+
+			for valueIndex, valueInArray in value :: { unknown } do
+				outputConcatTbl[valueIndex] = formatValue(valueInArray)
+			end
+
+			output = string.format(
+				"%s%s%s{%*},\n",
+				output,
+				indentStr,
+				formatKey(key, inSequence),
+				table.concat(outputConcatTbl, ", ")
+			)
+			continue
+		end
+
+		output = string.format(
+			"%s%s%s{\n%s%s},\n",
+			output,
+			indentStr,
+			formatKey(key, inSequence),
+			traverseTable(value :: any, seen, indent + 1),
+			indentStr
+		)
+
+		seen[value] = nil
+	end
+
+	return output
+end
+
+local function pp(data: unknown): string
+	-- if it's not a primitive, we'll pretty print it as a value
+	if type(data) ~= "table" then
+		return formatValue(data)
+	end
+
+    local count = 0
+    for _, c in data do 
+        count += 1
+        break 
+    end
+
+    if count == 0 then return "{}" end
+
+	-- FIXME(luau): `{[unknown]: unknown} should be treated identically to `table`
+	return `\{\n{traverseTable(data :: { [unknown]: unknown }, { [data] = true }, 1)}\}`
+end
+-- End vendored: pp
 
 type Rule = {
     kind: "Nonterminal",
@@ -44,7 +232,7 @@ type ProcessedParseTree = {
 --
 -- Approach:
 -- - Start with root node 'r'
-local function parseTree(pt: ParseTree): {ProcessedParseTree}
+local function parseTree(pt: ParseTree, print: (...any) -> ()): {ProcessedParseTree}
     local strings: {string} = {}
     local prob: {number} = {}
     local numChildren: {string} = {}
@@ -123,7 +311,7 @@ local function tabulate(tab: {{string}}): string
     return table.concat(tabulated, "\n")
 end
 
-local function cyk(inputString: string, grammarRules: RuleSet, print: (...any) -> (), debug: boolean?): ({number}, ParseTree?)
+local function cyk(inputString: string, grammarRules: RuleSet, print: (...any) -> (), debug: boolean?): ParseTree?
     -- Find all nonterminal rules first
     local nonterminalRules = {}
     for i, rule in grammarRules do 
@@ -420,11 +608,10 @@ local function cyk(inputString: string, grammarRules: RuleSet, print: (...any) -
     end
 
     if not foundStart then 
-        return {}, nil
+        return nil
     end
 
     -- Backtrace the rules
-    local prob: {number} = {}
     local function backTraceRule(i: number, j: number, rule: string, parent: string, probIdx: number, currProb: number): ParseTree 
         local rules = {}
         for _, brule in back[i][j] do 
@@ -443,8 +630,6 @@ local function cyk(inputString: string, grammarRules: RuleSet, print: (...any) -
             if debug then
                 print("At tree " .. (realIdx) .. ": root: " .. rule .. " | left: " .. backtrace.rules.a .. " | right: " .. backtrace.rules.b .. " (" .. backtrace.rules.prob .. ") | parent: " .. parent)
             end
-
-            prob[realIdx] = if prob[realIdx] then prob[realIdx] * backtrace.rules.prob else currProb * backtrace.rules.prob
 
             local path: ParseTreePath = {
                 prob = backtrace.rules.prob
@@ -468,11 +653,7 @@ local function cyk(inputString: string, grammarRules: RuleSet, print: (...any) -
         root = startLabel
     })
 
-    if debug then
-        print("Probabilities", prob)
-    end
-
-    return prob, ptree
+    return ptree
 end
 
 --KH
@@ -564,11 +745,23 @@ local grammarRules_in: RuleSet = {
     }
 }
 
-local inputString_in = "dsse"
+local function ppPrint<T>(...: T) 
+    local tab = table.pack(...)
 
+    local tabParsed = {}
+    for i, p in tab do 
+        i = i :: any
+        if i == "n" then continue end
+        tabParsed[#tabParsed + 1] = pp(p) 
+    end
+
+    print(unpack(tabParsed))
+end
+
+local inputString_in = "dsse"
 -- Part A
-local _, pt = cyk(inputString_in, grammarRules_in, print :: any, true)
-print(parseTree(pt :: ParseTree))
+local pt = cyk(inputString_in, grammarRules_in, ppPrint :: any, true)
+print(parseTree(pt :: ParseTree, ppPrint :: any))
 
 -- Try an example with 2 parse trees
 local p1a = 0.5
@@ -579,7 +772,7 @@ local p3a = 0.8
 local q3a = 1 - p3a
 local p4a = 0.1
 local q4a = 1 - p4a
-_, pt = cyk(
+pt = cyk(
     "baaba",
     {
         {
@@ -646,10 +839,10 @@ _, pt = cyk(
             symbol = "a"
         },
     },
-    print :: any, 
+    ppPrint :: any, 
     true
 )
-print(parseTree(pt :: ParseTree))
+print(pp(parseTree(pt :: ParseTree, ppPrint :: any)))
 
 -- Part B
 --[[
