@@ -760,7 +760,7 @@ end
 
 local inputString_in = "dsse"
 -- Part A
-local pt = cyk(inputString_in, grammarRules_in, ppPrint :: any, true)
+local pt = cyk(inputString_in, grammarRules_in, ppPrint :: any, false)
 print(parseTree(pt :: ParseTree, ppPrint :: any))
 
 -- Try an example with 2 parse trees
@@ -840,17 +840,49 @@ pt = cyk(
         },
     },
     ppPrint :: any, 
-    true
+    false
+)
+print("baaba", pp(parseTree(pt :: ParseTree, ppPrint :: any)))
+
+-- Example from textbook
+pt = cyk(
+    "aaa",
+    {
+        {
+            kind = "Start",
+            label = "S0",
+            rule = "S",
+            probability = 1
+        },
+        -- S = SS/a
+        {
+            kind = "TerminalProduct",
+            label = "S",
+            probability = p1a,
+            ruleA = "S",
+            ruleB = "S"
+        },
+        {
+            kind = "Nonterminal",
+            label = "S",
+            probability = q1a,
+            symbol = "a"
+        }
+    },
+    ppPrint :: any,
+    false
 )
 print(pp(parseTree(pt :: ParseTree, ppPrint :: any)))
 
 -- Part B
---[[
+
 local function dummyPrint(...) end
 local maxProb = 0
+local maxProbString = ""
+local maxProbParseTrees: {ProcessedParseTree} = {}
 
--- Fast algo adopted from https://stackoverflow.com/questions/71683221/generation-of-all-sequences-of-length-n-from-numbers-0-1-k-1-with-minimal-change
-local n = 19
+-- Base fast algo adopted from https://stackoverflow.com/questions/71683221/generation-of-all-sequences-of-length-n-from-numbers-0-1-k-1-with-minimal-change
+local n = 11
 
 local totalPermutes = 3^n
 local shownPermutes = 0
@@ -863,10 +895,19 @@ end
 while true do
     shownPermutes += 1
     local str = table.concat(s)
-    local prob = cyk(table.concat(s), grammarRules_in, dummyPrint :: any, false)
-    if prob and prob > maxProb then 
-        lastShownProgress = (shownPermutes / totalPermutes) * 100
-        print("New max prob of " .. prob .. " with string " .. str .. " with progress of [" .. lastShownProgress .. "%]")
+    local ptrees = cyk(table.concat(s), grammarRules_in, dummyPrint :: any, false)
+    
+    if ptrees then 
+        local parsedTree = parseTree(ptrees, dummyPrint :: any) 
+        for _, ptree in parsedTree do 
+            if ptree.prob > maxProb then 
+                lastShownProgress = (shownPermutes / totalPermutes) * 100
+                print("New max prob of " .. ptree.prob .. " with string " .. str .. " with progress of [" .. lastShownProgress .. "%]")
+                maxProb = ptree.prob
+                maxProbString = str
+                maxProbParseTrees = parsedTree
+            end
+        end
     end
     --print(table.concat(s))
 
@@ -891,13 +932,15 @@ while true do
     end
 end
 
---[[
+print("[m1] Max prob of " .. maxProb .. " with string " .. maxProbString)
+print("[m1] parse trees: ", maxProbParseTrees)
+
 -- Initial slow algorithm (same base idea except uses more memory/time and generates from bottom up instead)
 -- d, s -> add d, s
 -- dd, ds, de, sd, ss, se -> take existing d, s and add d, s, e
 local basePairs = {"s", "d", "e"}
 local nucleotides = {"s", "d"} -- {"d", "s"}
-for i = 1, 3 do -- For each iteration
+for i = 1, n-1 do -- For each iteration
     print("Iteration " .. i)
 
     local newNucleotides = {}
@@ -914,6 +957,39 @@ for i = 1, 3 do -- For each iteration
     nucleotides = newNucleotides
 end
 
-print(nucleotides)
-print("Number of nucleotides: " .. #nucleotides)
-]]
+print("[m2] Number of nucleotides: " .. #nucleotides)
+
+maxProb = 0
+maxProbString = ""
+shownPermutes = 0
+totalPermutes = #nucleotides
+lastShownProgress = 0
+maxProbParseTrees = {}
+
+for _, nucleotide in nucleotides do 
+    local ptree2 = cyk(nucleotide, grammarRules_in, dummyPrint :: any, false)
+    if ptree2 then 
+        local parsedTree = parseTree(ptree2, dummyPrint :: any)
+        for _, ptree in parsedTree do 
+            if ptree.prob > maxProb then 
+                lastShownProgress = (shownPermutes / totalPermutes) * 100
+                print("New max prob of " .. ptree.prob .. " with string " .. nucleotide .. " with progress of [" .. lastShownProgress .. "%]")
+                maxProb = ptree.prob
+                maxProbString = nucleotide
+                maxProbParseTrees = parsedTree
+            end
+        end
+    end
+
+    -- Show progress update
+    local newLastShownProgress = (shownPermutes / totalPermutes) * 100
+    if newLastShownProgress - lastShownProgress > 5 then 
+        print("Status update: " .. newLastShownProgress .. "%")
+        lastShownProgress = newLastShownProgress
+    end
+
+    shownPermutes += 1
+end
+
+print("[m2] Max prob of " .. maxProb .. " with string " .. maxProbString)
+print("[m2] parse trees: ", maxProbParseTrees)
