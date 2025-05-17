@@ -880,62 +880,8 @@ local function dummyPrint(...) end
 local maxProb = 0
 local maxProbString = ""
 local maxProbParseTrees: {ProcessedParseTree} = {}
-
--- Base fast algo adopted from https://stackoverflow.com/questions/71683221/generation-of-all-sequences-of-length-n-from-numbers-0-1-k-1-with-minimal-change
 local n = 11
 
-local totalPermutes = 3^n
-local shownPermutes = 0
-local lastShownProgress = 0
-
-local s = {}
-for i = 1, n do 
-    s[#s + 1] = "s"
-end
-while true do
-    shownPermutes += 1
-    local str = table.concat(s)
-    local ptrees = cyk(table.concat(s), grammarRules_in, dummyPrint :: any, false)
-    
-    if ptrees then 
-        local parsedTree = parseTree(ptrees, dummyPrint :: any) 
-        for _, ptree in parsedTree do 
-            if ptree.prob > maxProb then 
-                lastShownProgress = (shownPermutes / totalPermutes) * 100
-                print("New max prob of " .. ptree.prob .. " with string " .. str .. " with progress of [" .. lastShownProgress .. "%]")
-                maxProb = ptree.prob
-                maxProbString = str
-                maxProbParseTrees = parsedTree
-            end
-        end
-    end
-    --print(table.concat(s))
-
-    local k = n
-    while k >= 1 and s[k] == "e" do 
-        s[k] = "s"
-        k-=1
-    end
-
-    if k == 0 then break end
-
-    if s[k] == "s" then 
-        s[k] = "d"
-    elseif s[k] == "d" then
-        s[k] = "e" 
-    end
-
-    local newLastShownProgress = (shownPermutes / totalPermutes) * 100
-    if newLastShownProgress - lastShownProgress > 5 then 
-        print("Status update: " .. newLastShownProgress .. "%")
-        lastShownProgress = newLastShownProgress
-    end
-end
-
-print("[m1] Max prob of " .. maxProb .. " with string " .. maxProbString)
-print("[m1] parse trees: ", maxProbParseTrees)
-
--- Initial slow algorithm (same base idea except uses more memory/time and generates from bottom up instead)
 -- d, s -> add d, s
 -- dd, ds, de, sd, ss, se -> take existing d, s and add d, s, e
 local basePairs = {"s", "d", "e"}
